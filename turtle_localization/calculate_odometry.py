@@ -15,6 +15,8 @@ class CalculateOdometry(Node):
         # time series of rotation matrices and transformation vectors
         self.Rs = [np.eye(3)]
         self.ts = [np.zeros(3)]
+        self.x = None
+        self.y = None
 
         self.subscription = self.create_subscription(
             LaserScan,
@@ -29,11 +31,11 @@ class CalculateOdometry(Node):
         assert R.shape == (3,3) and t.shape == (3,) and x.shape[1] == 3, "Wrong shapes"
         return (R @ x.T + t[:, None]).T
 
-    def compute_world_coords(scan: LaserScan) -> np.ndarray:
-        """ Assumes 2D scanner, i.e. wont work in 3D """
+    def compute_world_coords(self, scan: LaserScan) -> np.ndarray:
+        """ Assumes 2D scanner, i.e. (probably) wont work in 3D """
         angles = np.arange(scan.angle_min, scan.angle_max, step = scan.angle_increment)
-        x = scan.ranges * np.cos(angles)
-        y = scan.ranges * np.sin(angles)
+        x = np.array(scan.ranges) * np.cos(angles)
+        y = np.array(scan.ranges) * np.sin(angles)
         z = np.zeros(len(scan.ranges))
 
         # "rotate" by -90 degrees to get 0 degrees to be forwards
@@ -149,25 +151,38 @@ class CalculateOdometry(Node):
         b = (Rs[-2].T @ (ts[-1] - ts[-2])).reshape(-1,1)
 
         c = np.hstack([a,b])
-        T_pred = np.vstack([c, [0,0,0,1]]) # What is this used for ???
+        T_pred = np.vstack([c, [0,0,0,1]]) # calculated easily, but what is this used for ???
 
         v = (Rs[-2].T @ (ts[-1] - ts[-2])) / delta_t
-        w = self.log_rotation(Rs[-2].T @ Rs[-1]) / delta_t # This is wrong
+        w = self.log_rotation(Rs[-2].T @ Rs[-1]) / delta_t
 
         return v, w
 
 
     def scan_callback(self, scan: LaserScan):
-        R, t = self.ICP(scan)
+        """ Take a scan and estimate linear and angular velocity"""
+
+        # Update the target and current points
+        self.x = self.compute_world_coords(scan)
+
+        # remove points that are inf
+        self.x = self.x[np.all(self.x < np.inf,axis=1)]
+        print(self.x)
+        print(self.x.shape)
+        print(self.y.shape)
+        if self.y is None:
+            self.y = self.x.copy()
+
+        R, t = self.ICP(self.x, self.y)
         
         self.Rs.append(R)
         self.ts.append(t)
 
         v,w = self.compute_pose_estimate(self.Rs, self.ts, scan.scan_time)
 
+        self.get_logger().info(f'I heard: {scan.header}, v:{v}, w:{w}, R:{R}, t:{t}')
 
-        self.get_logger().info('I heard: "%s"' % scan.header)
-
+        self.y = self.x
 
 
 def main(args=None):
