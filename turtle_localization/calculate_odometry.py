@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 
+from scipy.spatial.distance import cdist
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
 
@@ -31,12 +32,12 @@ class CalculateOdometry(Node):
         assert R.shape == (3,3) and t.shape == (3,) and x.shape[1] == 3, "Wrong shapes"
         return (R @ x.T + t[:, None]).T
 
-    def compute_world_coords(self, scan: LaserScan) -> np.ndarray:
+    def compute_world_coords(self, ranges: np.ndarray, angles: np.ndarray) -> np.ndarray:
         """ Assumes 2D scanner, i.e. (probably) wont work in 3D """
-        angles = np.arange(scan.angle_min, scan.angle_max, step = scan.angle_increment)
-        x = np.array(scan.ranges) * np.cos(angles)
-        y = np.array(scan.ranges) * np.sin(angles)
-        z = np.zeros(len(scan.ranges))
+        # angles = np.arange(scan.angle_min, scan.angle_max, step = scan.angle_increment)
+        x = ranges * np.cos(angles)
+        y = ranges * np.sin(angles)
+        z = np.zeros(len(ranges))
 
         # "rotate" by -90 degrees to get 0 degrees to be forwards
         # replace x=-y with x=y to flip around x axis, i.e. scan direction clockwise
@@ -104,14 +105,17 @@ class CalculateOdometry(Node):
             distances, indices = nbrs.kneighbors(self.transform(x,R,t))
 
             x_closest, y_closest = self.compute_closest_pairs(x, y, distances, indices, distance_threshold)
-
-            R, t = self.compute_transformation_params(x_closest, y_closest, weights=None)
             
+            R, t = self.compute_transformation_params(x_closest, y_closest, p=None)
             x_hat = self.transform(x,R,t)
-
             # Convergence check
-            if np.allclose(x_hat, y, rtol = tolerance): # idk about the tolerance parameter, should visualize to find a good value
+            #print(cdist(x_hat, y))
+            distances, indices = nbrs.kneighbors(x_hat)
+            # print(np.sum(distances))
+            if np.sum(distances) < tolerance:
                 break
+            #if np.allclose(x_hat, y, rtol = tolerance): # idk about the tolerance parameter, should visualize to find a good value
+            #    break
 
         return R, t
     
@@ -161,15 +165,18 @@ class CalculateOdometry(Node):
 
     def scan_callback(self, scan: LaserScan):
         """ Take a scan and estimate linear and angular velocity"""
+        np.set_printoptions(precision=2)
+        np.set_printoptions(suppress=True)
+
+        # Remove points that are inf
+        ranges = np.array(scan.ranges)
+        ranges = ranges[np.invert(np.isinf(ranges))] # convoluted way of removing rows with -inf or inf
+        angles = scan.angle_min + np.where(~np.isinf(ranges))[0] * scan.angle_increment # get the indices of the ranges that are kept
 
         # Update the target and current points
-        self.x = self.compute_world_coords(scan)
+        self.x = self.compute_world_coords(ranges, angles)
 
-        # remove points that are inf
-        self.x = self.x[np.all(self.x < np.inf,axis=1)]
-        print(self.x)
-        print(self.x.shape)
-        print(self.y.shape)
+        # Set y if this is our first run
         if self.y is None:
             self.y = self.x.copy()
 
@@ -178,9 +185,11 @@ class CalculateOdometry(Node):
         self.Rs.append(R)
         self.ts.append(t)
 
-        v,w = self.compute_pose_estimate(self.Rs, self.ts, scan.scan_time)
+        v,w = self.compute_velocity(self.Rs, self.ts, 1.0)
 
-        self.get_logger().info(f'I heard: {scan.header}, v:{v}, w:{w}, R:{R}, t:{t}')
+        #self.get_logger().info(f'\nI heard:\n {scan.time_increment}, \nv:\n{v}, \nw:\n{w}, \nR:\n{R}, \nt:\n{t}')
+        #self.get_logger().info(f"{v}")
+        print(v)
 
         self.y = self.x
 
