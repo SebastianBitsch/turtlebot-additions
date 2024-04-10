@@ -5,8 +5,37 @@ from scipy.spatial.distance import cdist
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
 
-from sensor_msgs.msg import LaserScan
 
+from sensor_msgs.msg import LaserScan, PointField, PointCloud2
+from std_msgs.msg import Header
+
+def point_cloud(points, parent_frame: str):
+
+    ros_dtype = PointField.FLOAT32
+    dtype = np.float32
+    itemsize = np.dtype(dtype).itemsize # A 32-bit float takes 4 bytes.
+
+    data = points.astype(dtype).tobytes() 
+
+    # The fields specify what the bytes represents. The first 4 bytes 
+    # represents the x-coordinate, the next 4 the y-coordinate, etc.
+    fields = [PointField(name=n, offset=i*itemsize, datatype=ros_dtype, count=1) for i, n in enumerate('xyz')]
+
+    # The PointCloud2 message also has a header which specifies which 
+    # coordinate frame it is represented in. 
+    header = Header(frame_id=parent_frame)
+
+    return PointCloud2(
+        header=header,
+        height=1, 
+        width=points.shape[0],
+        is_dense=False,
+        is_bigendian=False,
+        fields=fields,
+        point_step=(itemsize * 3), # Every point consists of three float32s.
+        row_step=(itemsize * 3 * points.shape[0]), 
+        data=data
+    )
 
 class CalculateOdometry(Node):
 
@@ -19,6 +48,11 @@ class CalculateOdometry(Node):
         self.x = None
         self.y = None
 
+        self.points = np.random.randn(10,3) # init to random points
+        self.pcd_publisher = self.create_publisher(PointCloud2, 'pcd', 10)
+        timer_period = 1/30.0
+        self.timer = self.create_timer(timer_period, self.timer_callback)
+
         self.subscription = self.create_subscription(
             LaserScan,
             'scan',
@@ -26,6 +60,10 @@ class CalculateOdometry(Node):
             10
         )
         self.subscription  # prevent unused variable warning, not sure needed
+
+    def timer_callback(self):
+        self.pcd = point_cloud(self.points, 'base_footprint') # the baselink of the robot
+        self.pcd_publisher.publish(self.pcd)
 
     def transform(self, x: np.ndarray, R: np.ndarray, t: np.ndarray) -> np.ndarray:
         """ rotate and move a vector, not sure transform is the right word """
@@ -38,14 +76,6 @@ class CalculateOdometry(Node):
         x = ranges * np.cos(angles)
         y = ranges * np.sin(angles)
         z = np.zeros(len(ranges))
-
-        # "rotate" by -90 degrees to get 0 degrees to be forwards
-        # replace x=-y with x=y to flip around x axis, i.e. scan direction clockwise
-        # can be seen in the header of the scan
-        # this can just be done directly in the first two lines instead of here, just like this for now
-        temp = x
-        x = -y
-        y = temp
 
         coords = np.vstack([x, y, z]).T # [360, 3] for instance
         return coords
@@ -90,11 +120,11 @@ class CalculateOdometry(Node):
         return closest_point_pairs[:,0,:], closest_point_pairs[:,1,:]
     
 
-    def ICP(self, x: np.ndarray, y: np.ndarray, max_iters: int = 10) -> tuple[np.ndarray, np.ndarray]:
+    def ICP(self, x: np.ndarray, y: np.ndarray, max_iters: int = 100) -> tuple[np.ndarray, np.ndarray]:
         """ Does vanilla point-to-point ICP. Not KISS-ICP, too hard tbh """
         R = np.eye(3)
         t = np.zeros(3)
-        distance_threshold = 100.0 # should ideally not be a parameter, makes it hard to tune
+        distance_threshold = 1.0 # should ideally not be a parameter, makes it hard to tune
         tolerance = 0.2  # idk a good value
 
         nbrs = NearestNeighbors(n_neighbors=1, algorithm='kd_tree').fit(y)
@@ -109,13 +139,9 @@ class CalculateOdometry(Node):
             R, t = self.compute_transformation_params(x_closest, y_closest, p=None)
             x_hat = self.transform(x,R,t)
             # Convergence check
-            #print(cdist(x_hat, y))
             distances, indices = nbrs.kneighbors(x_hat)
-            # print(np.sum(distances))
             if np.sum(distances) < tolerance:
                 break
-            #if np.allclose(x_hat, y, rtol = tolerance): # idk about the tolerance parameter, should visualize to find a good value
-            #    break
 
         return R, t
     
@@ -169,9 +195,10 @@ class CalculateOdometry(Node):
         np.set_printoptions(suppress=True)
 
         # Remove points that are inf
-        ranges = np.array(scan.ranges)
-        ranges = ranges[np.invert(np.isinf(ranges))] # convoluted way of removing rows with -inf or inf
-        angles = scan.angle_min + np.where(~np.isinf(ranges))[0] * scan.angle_increment # get the indices of the ranges that are kept
+        all_ranges = np.array(scan.ranges)
+
+        ranges = all_ranges[np.invert(np.isinf(all_ranges))] # convoluted way of removing rows with -inf or inf
+        angles = scan.angle_min + np.where(~np.isinf(all_ranges))[0] * scan.angle_increment # get the indices of the ranges that are kept
 
         # Update the target and current points
         self.x = self.compute_world_coords(ranges, angles)
@@ -189,7 +216,6 @@ class CalculateOdometry(Node):
 
         #self.get_logger().info(f'\nI heard:\n {scan.time_increment}, \nv:\n{v}, \nw:\n{w}, \nR:\n{R}, \nt:\n{t}')
         #self.get_logger().info(f"{v}")
-        print(v)
 
         self.y = self.x
 
