@@ -120,31 +120,50 @@ class CalculateOdometry(Node):
         return closest_point_pairs[:,0,:], closest_point_pairs[:,1,:]
     
 
-    def ICP(self, x: np.ndarray, y: np.ndarray, max_iters: int = 100) -> tuple[np.ndarray, np.ndarray]:
+    def ICP(self, x: np.ndarray, y: np.ndarray, max_iters: int = 100, verbose: bool = False) -> tuple[np.ndarray, np.ndarray]:
         """ Does vanilla point-to-point ICP. Not KISS-ICP, too hard tbh """
         R = np.eye(3)
         t = np.zeros(3)
-        distance_threshold = 1.0 # should ideally not be a parameter, makes it hard to tune
-        tolerance = 0.2  # idk a good value
+
+        prev_indices = None
 
         nbrs = NearestNeighbors(n_neighbors=1, algorithm='kd_tree').fit(y)
 
-        # Iterative loop
-        for _ in range(max_iters):
-            # Find the nearest neighbors for each point in the moving point cloud x
-            distances, indices = nbrs.kneighbors(self.transform(x,R,t))
+        for i in range(max_iters):
+    
+            x_hat = self.transform(x, R, t)
 
-            x_closest, y_closest = self.compute_closest_pairs(x, y, distances, indices, distance_threshold)
-            
-            R, t = self.compute_transformation_params(x_closest, y_closest, p=None)
-            x_hat = self.transform(x,R,t)
-            # Convergence check
+            # Get matching
             distances, indices = nbrs.kneighbors(x_hat)
-            if np.sum(distances) < tolerance:
+            distances = distances.ravel()
+            indices = indices.ravel()
+
+            # Find outliers
+            inlier_indices = distances < np.mean(distances) + 2 * np.std(distances)
+            indices = indices[inlier_indices]
+
+            # Remove outliers
+            x_hat = x_hat[inlier_indices]
+            y_hat = y[indices]
+
+            # Fit points
+            R_delta, t_delta = self.compute_transformation_params(x_hat, y_hat)
+            R = R @ R_delta
+            t = t + t_delta
+
+            # Calculate error
+            if verbose:
+                mse = np.mean((x_hat - y_hat)**2)
+                print(f"ICP error @ iteration {i + 1}: {mse:.5f} | n points {len(x_hat)}")
+
+            # If nothing is changed, we stop
+            if np.array_equal(indices, prev_indices):
                 break
 
+            prev_indices = indices
+
         return R, t
-    
+
 
     def log_rotation(self, R: np.ndarray) -> np.ndarray:
         """
