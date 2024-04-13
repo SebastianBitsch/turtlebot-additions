@@ -121,7 +121,18 @@ class CalculateOdometry(Node):
     
 
     def ICP(self, x: np.ndarray, y: np.ndarray, max_iters: int = 100, verbose: bool = False) -> tuple[np.ndarray, np.ndarray]:
-        """ Does vanilla point-to-point ICP. Not KISS-ICP, too hard tbh """
+        """
+        Does vanilla point-to-point ICP. See: https://en.wikipedia.org/wiki/Iterative_closest_point
+
+        Args:
+            x (np.ndarray): Source point cloud, shape (N, 3).
+            y (np.ndarray): Target point cloud, shape (M, 3).
+            max_iters (int, optional): Maximum number of iterations. Defaults to 100.
+            verbose (bool, optional): Whether to print iteration information. Defaults to False.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: Tuple containing the rotation matrix (R) and translation vector (t) to align x to y.
+        """
         R = np.eye(3)
         t = np.zeros(3)
 
