@@ -20,7 +20,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'calculate = turtle_localization.calculate_odometry:main',
+            'odometry = turtle_localization.calculate_odometry:main',
+            'mapping = turtle_localization.publish_map:main',
         ],
     },
 )
