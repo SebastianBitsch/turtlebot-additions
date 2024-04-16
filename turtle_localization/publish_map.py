@@ -8,7 +8,13 @@ from sensor_msgs.msg import LaserScan, PointField, PointCloud2
 from std_msgs.msg import Header
 from geometry_msgs.msg import Pose, Point, Quaternion
 from nav_msgs.msg import OccupancyGrid, Odometry, MapMetaData
+import tf2_geometry_msgs
+from tf2_geometry_msgs import do_transform_point
 
+# Transforms stuff
+from tf2_ros import TransformException
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
 
 def quaternion_rotation_matrix(Q):
     """
@@ -54,13 +60,13 @@ def quaternion_rotation_matrix(Q):
 # def array2occupancy_grid(map: np.ndarray, map_width: int, map_height: int, map_resolution: float, map_origin: Pose) -> OccupancyGrid:
 def array2occupancy_grid(map: np.ndarray):
     return OccupancyGrid(
-        header = Header(frame_id = "map"), # this is the "true" map - dont know if thats correct
+        header = Header(frame_id = "map"), # the reference frame is the "true" map - which is the top level tf
         info = MapMetaData(
             resolution = 0.05,
             width = 311,
             height = 164,
             origin = Pose(
-                position = Point(x = -7.79, y = -4.06, z = 0.0),
+                position = Point(x = -7.79, y = -4.06, z = 0.0), # TODO: How are we supposed to get this ??
                 orientation = Quaternion(x = 0.0, y = 0.0, z = 0.0, w = 1.0)
             )
         ),
@@ -74,9 +80,18 @@ class MapPublisher(Node):
         super().__init__('map_publisher')
         self.verbose = verbose
 
+        # Declare and acquire `target_frame` parameter
+        # TODO: Dont know why we define it like this
+        self.target_frame = self.declare_parameter('target_frame', 'base_link').get_parameter_value().string_value
+
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
+
         # State of the robot
         self.robot_position = np.zeros(3)
         self.robot_rotation = np.zeros(4)
+        self.robot_pose = Pose()
 
         # Init map
         self.width = map_width
@@ -90,7 +105,7 @@ class MapPublisher(Node):
         # self.map[self.map <= threshold] = 0
 
         # Create a publisher to send map
-        self.map_publisher = self.create_publisher(OccupancyGrid, 'map1', 10) # qos = 10
+        self.map_publisher = self.create_publisher(OccupancyGrid, topic = 'map1', qos_profile = 10)
         self.timer = self.create_timer(publish_frequency, self.publish_map)
 
         # Subscribe to the scan message
@@ -150,14 +165,41 @@ class MapPublisher(Node):
         points = self.compute_world_coords(ranges, angles)
 
         R = quaternion_rotation_matrix(self.robot_rotation)
+
+        pose_stamped = tf2_geometry_msgs.PoseStamped()
+        pose_stamped.pose = self.robot_pose
+        pose_stamped.pose.position.x += 10.0
+        pose_stamped.header.frame_id = "base_link"
+        pose_stamped.header.stamp = rclpy.time.Time().to_msg() #self.get_clock().now().to_msg()
+
+        try:
+            t = self.tf_buffer.transform(pose_stamped, "map", rclpy.duration.Duration(seconds=1.0))
+            # t = self.tf_buffer.wait_for_transform_async("map", "baselink", self.get_clock().now().to_msg())
+            
+            print(t)
+        except TransformException as ex:
+            self.get_logger().info(
+                f'Could not transform {ex}')
+            return
         
-        # world_coords = self.robot_position + points @ np.linalg.inv(R)
+        #lookup_transform("map", self.target_frame, rclpy.time.Time())
+
+
+        for robo_coords in points:
+            world_coords = self.robot_position + robo_coords #  @ np.linalg.inv(R)
+
+            grid_coords = self.world_coords2map_coords(world_coords[1], world_coords[0])
+            if grid_coords[0] < self.height and grid_coords[1] < self.width:
+                self.map[grid_coords[0], grid_coords[1]] = 100
+
+        
         # print(world_coords[0])
         
 
 
     def odometry_callback(self, odometry: Odometry) -> None:
         """ Update the robot position and rotation from the odometry """
+        self.robot_pose = odometry.pose.pose
         self.robot_position = np.array([
             odometry.pose.pose.position.x,
             odometry.pose.pose.position.y,
@@ -169,12 +211,6 @@ class MapPublisher(Node):
             odometry.pose.pose.orientation.z,
             odometry.pose.pose.orientation.w
         ])
-        grid_coords = self.world_coords2map_coords(self.robot_position[1], self.robot_position[0])
-        print(grid_coords, self.map.shape)
-        self.map[grid_coords[0], grid_coords[1]] = 100
-        # print(self.map.shape)
-
-
 
 def main(args=None):
     rclpy.init(args=args)
