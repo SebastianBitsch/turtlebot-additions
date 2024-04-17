@@ -126,7 +126,7 @@ class MapPublisher(Node):
         self.odom_subscription  # prevent unused variable warning, not sure needed
 
     def world_coords2map_coords(self, x, y) -> np.ndarray:
-        return np.floor(np.array([x,y]) / self.resolution + self.map_size / 2.0).astype("uint8")
+        return np.floor(np.array([y, x]) / self.resolution + self.map_size / 2.0)#.astype("uint8")
 
     def transform(self, x: np.ndarray, R: np.ndarray, t: np.ndarray) -> np.ndarray:
         """ rotate and move a vector, not sure transform is the right word """
@@ -184,11 +184,12 @@ class MapPublisher(Node):
                 t = do_transform_point(point, transform)
                 # print(t)
 
-                grid_coords = self.world_coords2map_coords(t.point.y, t.point.x)
+                grid_coords = self.world_coords2map_coords(t.point.x, t.point.y)
                 if i == 0:
-                    print(grid_coords)
+                    print(t.point.x, t.point.y, grid_coords, self.map_size)
                 if grid_coords[0] < self.height and grid_coords[1] < self.width:
-                    self.map[grid_coords[0], grid_coords[1]] = 100
+                    self.map[int(grid_coords[0]), int(grid_coords[1])] = 100
+                
             # t = self.tf_buffer.transform(pose_stamped, "map", rclpy.duration.Duration(seconds=1.0))
             # t = self.tf_buffer.wait_for_transform_async("map", "baselink", self.get_clock().now().to_msg())
             
