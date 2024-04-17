@@ -6,7 +6,7 @@ import numpy as np
 
 from sensor_msgs.msg import LaserScan, PointField, PointCloud2
 from std_msgs.msg import Header
-from geometry_msgs.msg import Pose, Point, Quaternion
+from geometry_msgs.msg import Pose, Point, Quaternion, PointStamped
 from nav_msgs.msg import OccupancyGrid, Odometry, MapMetaData
 import tf2_geometry_msgs
 from tf2_geometry_msgs import do_transform_point
@@ -83,10 +83,9 @@ class MapPublisher(Node):
         # Declare and acquire `target_frame` parameter
         # TODO: Dont know why we define it like this
         self.target_frame = self.declare_parameter('target_frame', 'base_link').get_parameter_value().string_value
-
+    
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-
 
         # State of the robot
         self.robot_position = np.zeros(3)
@@ -127,7 +126,7 @@ class MapPublisher(Node):
         self.odom_subscription  # prevent unused variable warning, not sure needed
 
     def world_coords2map_coords(self, x, y) -> np.ndarray:
-        return np.floor(np.array([x,y]) / self.resolution + self.map_size / 2).astype("uint8")
+        return np.floor(np.array([x,y]) / self.resolution + self.map_size / 2.0).astype("uint8")
 
     def transform(self, x: np.ndarray, R: np.ndarray, t: np.ndarray) -> np.ndarray:
         """ rotate and move a vector, not sure transform is the right word """
@@ -166,17 +165,34 @@ class MapPublisher(Node):
 
         R = quaternion_rotation_matrix(self.robot_rotation)
 
-        pose_stamped = tf2_geometry_msgs.PoseStamped()
-        pose_stamped.pose = self.robot_pose
-        pose_stamped.pose.position.x += 10.0
-        pose_stamped.header.frame_id = "base_link"
-        pose_stamped.header.stamp = rclpy.time.Time().to_msg() #self.get_clock().now().to_msg()
+        # pose_stamped = tf2_geometry_msgs.PoseStamped()
+        # pose_stamped.pose = self.robot_pose
+        # pose_stamped.pose.position.x += 10.0
+        # pose_stamped.header.frame_id = "base_link"
+        # pose_stamped.header.stamp = rclpy.time.Time().to_msg() #self.get_clock().now().to_msg()
 
         try:
-            t = self.tf_buffer.transform(pose_stamped, "map", rclpy.duration.Duration(seconds=1.0))
+            print("------")
+            transform = self.tf_buffer.lookup_transform("map", "base_link", rclpy.time.Time().to_msg())
+
+            for i, coord in enumerate(points):
+                point = PointStamped()
+                point.header.frame_id = "base_link"
+                point.point.x = coord[0]
+                point.point.y = coord[1]
+                point.point.z = coord[2]
+                t = do_transform_point(point, transform)
+                # print(t)
+
+                grid_coords = self.world_coords2map_coords(t.point.y, t.point.x)
+                if i == 0:
+                    print(grid_coords)
+                if grid_coords[0] < self.height and grid_coords[1] < self.width:
+                    self.map[grid_coords[0], grid_coords[1]] = 100
+            # t = self.tf_buffer.transform(pose_stamped, "map", rclpy.duration.Duration(seconds=1.0))
             # t = self.tf_buffer.wait_for_transform_async("map", "baselink", self.get_clock().now().to_msg())
             
-            print(t)
+            # print(t)
         except TransformException as ex:
             self.get_logger().info(
                 f'Could not transform {ex}')
@@ -185,12 +201,12 @@ class MapPublisher(Node):
         #lookup_transform("map", self.target_frame, rclpy.time.Time())
 
 
-        for robo_coords in points:
-            world_coords = self.robot_position + robo_coords #  @ np.linalg.inv(R)
+        # for robo_coords in points:
+        #     world_coords = self.robot_position + robo_coords #  @ np.linalg.inv(R)
 
-            grid_coords = self.world_coords2map_coords(world_coords[1], world_coords[0])
-            if grid_coords[0] < self.height and grid_coords[1] < self.width:
-                self.map[grid_coords[0], grid_coords[1]] = 100
+        #     grid_coords = self.world_coords2map_coords(world_coords[1], world_coords[0])
+        #     if grid_coords[0] < self.height and grid_coords[1] < self.width:
+        #         self.map[grid_coords[0], grid_coords[1]] = 100
 
         
         # print(world_coords[0])
