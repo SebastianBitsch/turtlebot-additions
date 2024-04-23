@@ -16,6 +16,39 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
 
+def DDA(x0, y0, x1, y1): 
+  
+    # find absolute differences 
+    dx = x1 - x0 
+    dy = y1 - y0
+  
+    # find maximum difference 
+    steps = max(abs(dx), abs(dy))
+  
+    # calculate the increment in x and y 
+    dx /= steps
+    dy /= steps
+  
+    # start with 1st point 
+    x = float(x0)
+    y = float(y0) 
+  
+    # make a list for coordinates 
+    x_coorinates = []
+    y_coorinates = []
+  
+    for _ in range(steps - 1): 
+        # append the x,y coordinates in respective list 
+        x_coorinates.append(x)
+        y_coorinates.append(y)
+  
+        # increment the values 
+        x += dx
+        y += dy
+    
+    return x_coorinates, y_coorinates
+
+
 class MapPublisher(Node):
     """ """
 
@@ -34,7 +67,10 @@ class MapPublisher(Node):
         # Init map
         self.map_resolution = map_resolution
         self.map_size = np.array(map_size, dtype=int)
-        self.map = np.zeros(map_size, dtype=int)
+        # self.map = np.zeros(map_size, dtype=int)
+        self.map = 100 * np.ones(map_size, dtype=int)
+        # self.map = np.random.rand(*map_size)
+        # self.map = 100 * (0.5 < self.map).astype(int)
 
         # Create a publisher to send map
         self.map_publisher = self.create_publisher(OccupancyGrid, topic = 'map1', qos_profile = 10)
@@ -92,6 +128,13 @@ class MapPublisher(Node):
         """ """
         self.map_publisher.publish(self.array2occupancy_grid(self.map))
 
+    def update_map(self, x:int, y:int, amount:int) -> None:
+        self.map[x,y] += amount
+        if self.map[x,y] < 0:
+            self.map[x,y] = 0
+        elif 100 < self.map[x,y]:
+            self.map[x,y] = 100
+
 
     def scan_callback(self, scan: LaserScan) -> None:
         """ Take a scan and estimate linear and angular velocity"""
@@ -99,10 +142,13 @@ class MapPublisher(Node):
         # Remove points that are inf
         all_ranges = np.array(scan.ranges)
 
-        non_inf_indices = ~np.isinf(all_ranges)
+        # non_inf_indices = ~np.isinf(all_ranges)
         
-        ranges = all_ranges[non_inf_indices] # convoluted way of removing rows with -inf or inf
-        angles = scan.angle_min + np.where(non_inf_indices)[0] * scan.angle_increment # get the indices of the ranges that are kept
+        # ranges = all_ranges[non_inf_indices] # convoluted way of removing rows with -inf or inf
+        # angles = scan.angle_min + np.where(non_inf_indices)[0] * scan.angle_increment # get the indices of the ranges that are kept
+        ranges = all_ranges
+        ranges[np.isinf(ranges)] = 200
+        angles = scan.angle_min + np.arange(len(ranges)) * scan.angle_increment
 
         # Update the target and current points
         points = self.compute_world_coords(ranges, angles)
@@ -126,8 +172,19 @@ class MapPublisher(Node):
             grid_coords = self.world_coords2map_coords(t.point.x, t.point.y)
 
             # Write the point to the grid
-            if (grid_coords < self.map_size).all():
-                self.map[grid_coords[0], grid_coords[1]] = 100
+            if (np.zeros(2) < grid_coords).all() and (grid_coords < self.map_size).all():
+                robot_grid_pos = self.world_coords2map_coords(self.robot_pose.position.x, self.robot_pose.position.y)
+                line_x, line_y = DDA(robot_grid_pos[0], robot_grid_pos[1], grid_coords[0], grid_coords[1])
+
+                self.update_map(grid_coords[0], grid_coords[1], 5)
+                # self.map[grid_coords[0], grid_coords[1]] = 
+
+                for x,y in zip(line_x, line_y):
+                    if (np.zeros(2) < np.array([x,y])).all() and (np.array([x,y]) < self.map_size).all():
+                        self.update_map(int(x), int(y), -5)
+                        # self.map[int(x), int(y)] = 
+                    # else:
+                    #     break
     
 
     def odometry_callback(self, odometry: Odometry) -> None:
