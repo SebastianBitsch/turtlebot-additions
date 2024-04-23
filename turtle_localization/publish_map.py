@@ -15,9 +15,12 @@ from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
+def DDA1(start, end):
+    diff = start - end
+    steps = np.max(np.abs(diff))
 
 def DDA(x0, y0, x1, y1): 
-  
+    """ Digital differential analyzer. See: https://en.wikipedia.org/wiki/Digital_differential_analyzer_(graphics_algorithm) """
     # find absolute differences 
     dx = x1 - x0 
     dy = y1 - y0
@@ -147,7 +150,8 @@ class MapPublisher(Node):
         # ranges = all_ranges[non_inf_indices] # convoluted way of removing rows with -inf or inf
         # angles = scan.angle_min + np.where(non_inf_indices)[0] * scan.angle_increment # get the indices of the ranges that are kept
         ranges = all_ranges
-        ranges[np.isinf(ranges)] = 200
+        hits = ~np.isinf(ranges)
+        ranges[np.isinf(ranges)] = scan.range_max
         angles = scan.angle_min + np.arange(len(ranges)) * scan.angle_increment
 
         # Update the target and current points
@@ -162,7 +166,7 @@ class MapPublisher(Node):
             return
 
         # Plot all the points
-        for point in points:
+        for point, hit in zip(points, hits):
             point = PointStamped(
                 header = Header(frame_id = "base_link"),
                 point = Point(x = point[0], y = point[1], z = point[2])
@@ -176,7 +180,8 @@ class MapPublisher(Node):
                 robot_grid_pos = self.world_coords2map_coords(self.robot_pose.position.x, self.robot_pose.position.y)
                 line_x, line_y = DDA(robot_grid_pos[0], robot_grid_pos[1], grid_coords[0], grid_coords[1])
 
-                self.update_map(grid_coords[0], grid_coords[1], 5)
+                if hit:
+                    self.update_map(grid_coords[0], grid_coords[1], 100)
                 # self.map[grid_coords[0], grid_coords[1]] = 
 
                 for x,y in zip(line_x, line_y):
