@@ -55,7 +55,7 @@ def DDA(x0, y0, x1, y1):
 class MapPublisher(Node):
     """ """
 
-    def __init__(self, map_size: tuple = (164, 311), map_resolution: float = 0.05, publish_frequency: float = 0.5, verbose: bool = False):
+    def __init__(self, map_size: tuple = (164, 311), map_resolution: float = 0.1, publish_frequency: float = 0.5, verbose: bool = False):
         """ map_size: height, width """
 
         super().__init__('map_publisher')
@@ -69,9 +69,10 @@ class MapPublisher(Node):
 
         # Init map
         self.map_resolution = map_resolution
-        self.map_size = np.array(map_size, dtype=int)
+        self.map_size = np.array(map_size, dtype=int) // 2
         # self.map = np.zeros(map_size, dtype=int)
-        self.map = 100 * np.ones(map_size, dtype=int)
+        self.map = 100 * np.ones(self.map_size, dtype=int)
+        print(self.map.shape)
         # self.map = np.random.rand(*map_size)
         # self.map = 100 * (0.5 < self.map).astype(int)
 
@@ -171,8 +172,8 @@ class MapPublisher(Node):
                 header = Header(frame_id = "base_link"),
                 point = Point(x = point[0], y = point[1], z = point[2])
             )
-            t = do_transform_point(point, transform)
 
+            t = do_transform_point(point, transform)
             grid_coords = self.world_coords2map_coords(t.point.x, t.point.y)
 
             # Write the point to the grid
@@ -181,13 +182,19 @@ class MapPublisher(Node):
                 line_x, line_y = DDA(robot_grid_pos[0], robot_grid_pos[1], grid_coords[0], grid_coords[1])
 
                 if hit:
-                    self.update_map(grid_coords[0], grid_coords[1], 100)
+                    self.map[grid_coords[0], grid_coords[1]] = 120 # grøn
+                    # self.update_map(grid_coords[0], grid_coords[1], 5)
+                # else:
+                #     continue
                 # self.map[grid_coords[0], grid_coords[1]] = 
 
                 for x,y in zip(line_x, line_y):
                     if (np.zeros(2) < np.array([x,y])).all() and (np.array([x,y]) < self.map_size).all():
-                        self.update_map(int(x), int(y), -5)
-                        # self.map[int(x), int(y)] = 
+                        # self.update_map(int(x), int(y), -5)
+                        if hit:
+                            self.map[int(x), int(y)] = -10 # yellow
+                        else: 
+                            self.map[int(x), int(y)] = -50 # orange
                     # else:
                     #     break
     
