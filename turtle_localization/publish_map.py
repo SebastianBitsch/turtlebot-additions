@@ -15,51 +15,22 @@ from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
-def DDA1(start, end):
-    diff = start - end
-    steps = np.max(np.abs(diff))
 
-def DDA(x0, y0, x1, y1): 
+def DDA(a:np.ndarray, b:np.ndarray) -> np.ndarray:
     """ Digital differential analyzer. See: https://en.wikipedia.org/wiki/Digital_differential_analyzer_(graphics_algorithm) """
-    # find absolute differences 
-    dx = x1 - x0 
-    dy = y1 - y0
-  
-    # find maximum difference 
-    steps = max(abs(dx), abs(dy))
-  
-    # calculate the increment in x and y 
-    dx /= steps
-    dy /= steps
-  
-    # start with 1st point 
-    x = float(x0)
-    y = float(y0) 
-  
-    # make a list for coordinates 
-    x_coorinates = []
-    y_coorinates = []
-  
-    for _ in range(steps - 1): 
-        # append the x,y coordinates in respective list 
-        x_coorinates.append(x)
-        y_coorinates.append(y)
-  
-        # increment the values 
-        x += dx
-        y += dy
-    
-    return x_coorinates, y_coorinates
+    delta = (b - a).astype(float)
+    steps = np.max(np.abs(delta)).astype(int)
+    delta /= steps
+    return [a + i * delta for i in range(steps - 1)]
 
 
 class MapPublisher(Node):
     """ """
 
-    def __init__(self, map_size: tuple = (164, 311), map_resolution: float = 0.1, publish_frequency: float = 0.5, verbose: bool = False):
+    def __init__(self, map_size: tuple = (164, 311), map_resolution: float = 0.1, publish_frequency: float = 0.5):
         """ map_size: height, width """
 
         super().__init__('map_publisher')
-        self.verbose = verbose
     
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self) # This has to be set although it isn't used
@@ -70,11 +41,7 @@ class MapPublisher(Node):
         # Init map
         self.map_resolution = map_resolution
         self.map_size = np.array(map_size, dtype=int) // 2
-        # self.map = np.zeros(map_size, dtype=int)
         self.map = 100 * np.ones(self.map_size, dtype=int)
-        print(self.map.shape)
-        # self.map = np.random.rand(*map_size)
-        # self.map = 100 * (0.5 < self.map).astype(int)
 
         # Create a publisher to send map
         self.map_publisher = self.create_publisher(OccupancyGrid, topic = 'map1', qos_profile = 10)
@@ -105,7 +72,7 @@ class MapPublisher(Node):
                 width = int(self.map_size[1]), # TODO: Dont know why we have to cast here, shouldnt be neccesary
                 height = int(self.map_size[0]), # TODO: Dont know why we have to cast here, shouldnt be neccesary
                 origin = Pose(
-                    position = Point(x = -7.79, y = -4.06, z = 0.0), # TODO: How are we supposed to get this ??
+                    position = Point(x = -7.79, y = -4.06, z = 0.0), # TODO: How are we supposed to get this ?? This is the center of the map
                     orientation = Quaternion(x = 0.0, y = 0.0, z = 0.0, w = 1.0)
                 )
             ),
@@ -113,7 +80,9 @@ class MapPublisher(Node):
         )
 
 
-    def world_coords2map_coords(self, x, y) -> np.ndarray:
+    def world2map_coords(self, x, y) -> np.ndarray:
+        """
+        """
         return np.floor(np.array([y, x]) / self.map_resolution + self.map_size / 2.0).astype(int)
 
 
@@ -132,71 +101,52 @@ class MapPublisher(Node):
         """ """
         self.map_publisher.publish(self.array2occupancy_grid(self.map))
 
-    def update_map(self, x:int, y:int, amount:int) -> None:
-        self.map[x,y] += amount
-        if self.map[x,y] < 0:
-            self.map[x,y] = 0
-        elif 100 < self.map[x,y]:
-            self.map[x,y] = 100
-
 
     def scan_callback(self, scan: LaserScan) -> None:
         """ Take a scan and estimate linear and angular velocity"""
 
-        # Remove points that are inf
-        all_ranges = np.array(scan.ranges)
+        ranges = np.array(scan.ranges)
 
-        # non_inf_indices = ~np.isinf(all_ranges)
-        
-        # ranges = all_ranges[non_inf_indices] # convoluted way of removing rows with -inf or inf
-        # angles = scan.angle_min + np.where(non_inf_indices)[0] * scan.angle_increment # get the indices of the ranges that are kept
-        ranges = all_ranges
+        # Replace angles where the scanner didn't hit (inf) with the max range of the scanner
         hits = ~np.isinf(ranges)
-        ranges[np.isinf(ranges)] = scan.range_max
+        ranges[~hits] = scan.range_max
         angles = scan.angle_min + np.arange(len(ranges)) * scan.angle_increment
 
-        # Update the target and current points
-        points = self.compute_world_coords(ranges, angles)
+        # Calculate the end points of the 360 scan lines
+        end_points = self.compute_world_coords(ranges, angles)
 
         # Get the transform from robot to world
         try:
-            transform = self.tf_buffer.lookup_transform("map", "base_link", rclpy.time.Time().to_msg())
+            robot2world_transform = self.tf_buffer.lookup_transform("map", "base_link", rclpy.time.Time().to_msg())
         except TransformException as exception:
-            if self.verbose:
-                self.get_logger().info(f'Could not transform point in mapping: {exception}')
+            self.get_logger().info(f'Could not transform point in mapping: {exception}')
             return
 
         # Plot all the points
-        for point, hit in zip(points, hits):
-            point = PointStamped(
+        for end_point, hit in zip(end_points, hits):
+            end_point = PointStamped(
                 header = Header(frame_id = "base_link"),
-                point = Point(x = point[0], y = point[1], z = point[2])
+                point = Point(x = end_point[0], y = end_point[1], z = end_point[2])
             )
 
-            t = do_transform_point(point, transform)
-            grid_coords = self.world_coords2map_coords(t.point.x, t.point.y)
+            end_point = do_transform_point(end_point, robot2world_transform)
+            grid_coords = self.world2map_coords(end_point.point.x, end_point.point.y)
 
             # Write the point to the grid
             if (np.zeros(2) < grid_coords).all() and (grid_coords < self.map_size).all():
-                robot_grid_pos = self.world_coords2map_coords(self.robot_pose.position.x, self.robot_pose.position.y)
-                line_x, line_y = DDA(robot_grid_pos[0], robot_grid_pos[1], grid_coords[0], grid_coords[1])
+                robot_grid_pos = self.world2map_coords(self.robot_pose.position.x, self.robot_pose.position.y)
+                line_points = DDA(robot_grid_pos, grid_coords)
 
+                # Handle direct hits to the objects of the 
                 if hit:
-                    self.map[grid_coords[0], grid_coords[1]] = 120 # grøn
-                    # self.update_map(grid_coords[0], grid_coords[1], 5)
-                # else:
-                #     continue
-                # self.map[grid_coords[0], grid_coords[1]] = 
+                    self.map[grid_coords[0], grid_coords[1]] = 100 # green
 
-                for x,y in zip(line_x, line_y):
+                for x, y in line_points:
                     if (np.zeros(2) < np.array([x,y])).all() and (np.array([x,y]) < self.map_size).all():
-                        # self.update_map(int(x), int(y), -5)
                         if hit:
-                            self.map[int(x), int(y)] = -10 # yellow
+                            self.map[int(x), int(y)] = 0#-10 # yellow
                         else: 
-                            self.map[int(x), int(y)] = -50 # orange
-                    # else:
-                    #     break
+                            self.map[int(x), int(y)] = 0#-50 # orange
     
 
     def odometry_callback(self, odometry: Odometry) -> None:
