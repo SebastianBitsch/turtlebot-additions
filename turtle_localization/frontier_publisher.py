@@ -67,7 +67,7 @@ class FrontierPublisher(Node):
     """
 
     def __init__(self, publish_frequncy:float = 0.1):
-        """ map_size: height, width """
+        """ """
 
         super().__init__('frontier_publisher')
 
@@ -113,7 +113,7 @@ class FrontierPublisher(Node):
 
 
     def map_callback(self, occupancy_grid: OccupancyGrid) -> None:
-        """ Take a scan and estimate linear and angular velocity"""
+        """ Take grid and get the frontier with BFS """
         
         map_width = occupancy_grid.info.width
         map_height = occupancy_grid.info.height

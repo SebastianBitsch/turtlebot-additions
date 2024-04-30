@@ -22,7 +22,8 @@ setup(
         'console_scripts': [
             'odometry = turtle_localization.calculate_odometry:main',
             'mapping = turtle_localization.publish_map:main',
-            'frontier = turtle_localization.frontier_publisher:main'
+            'frontier = turtle_localization.frontier_publisher:main',
+            'explore = turtle_localization.frontier_explorer:main'
         ],
     },
 )
