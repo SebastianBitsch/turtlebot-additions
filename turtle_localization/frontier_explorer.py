@@ -77,7 +77,8 @@ class FrontierPublisher(Node):
         return goal_msg
 
 
-    def map2world_coords(self, grid_x, grid_y) -> np.ndarray:        
+    def map2world_coords(self, grid_x, grid_y) -> np.ndarray:
+        # TODO: There is a bug here i am almost certain - should be fixable tho
         return (np.array([grid_x, grid_y]) - np.array([self.map_width, self.map_height]) / 2.0) * self.map_resolution
 
     
