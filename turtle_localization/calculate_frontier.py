@@ -18,51 +18,29 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
 
-
-# Direction vectors
-dRow = [ -1, 0, 1, 0]
-dCol = [ 0, 1, 0, -1]
- 
-# Function to check if a cell
-# is be visited or not
-def isValid(vis, grid, row, col):
-   
-    # If cell lies out of bounds
-    if (row < 0 or col < 0 or row >= 82 - 1 or col >= 155 - 1):
-        return False
-    
-    if grid[row][col] == -100:
-        return False
- 
-    # If cell is already visited
-    if (vis[row][col]):
-        return False
-
-    # Otherwise
-    return True
- 
-# Function to perform the BFS traversal
 def bfs(grid: np.ndarray, start: tuple) -> np.ndarray:
-    
-    visited = np.zeros_like(grid, dtype=bool)
-    frontier = np.zeros_like(grid, dtype=bool)
+    """ Simple BFS implementation on a grid """
+
+    h, w = grid.shape
+    visited = np.zeros_like(grid, dtype=bool)   # Keep track of which cells we have been to
+    frontier = np.zeros_like(grid, dtype=bool)  # The frontier map to publish
     queue = deque()
  
-    queue.append((start[0], start[1]))
+    queue.append(start)
     visited[*start] = True
- 
+    
     while 0 < len(queue):
         cell = queue.popleft()
         x = cell[0]
         y = cell[1]
   
         # Check neighbours
-        for i in range(4):
-            row = x + dRow[i]
-            col = y + dCol[i]
+        for dx, dy in [(-1,0), (0,1), (1,0), (0,-1)]: # The four neighbour directions; N,E,S,W 
+            row = x + dx
+            col = y + dy
             
             # Check out of bounds
-            if row < 0 or col < 0 or 82 <= row or 155 <= col:
+            if row < 0 or col < 0 or h <= row or w <= col:
                 continue
 
             # Check if already been here
@@ -74,7 +52,7 @@ def bfs(grid: np.ndarray, start: tuple) -> np.ndarray:
                 continue
 
             # Check if neighbour is unknown, if so we found a frontier
-            if grid[row, col] == -100:
+            if grid[row, col] == -100: # TODO: -100 is our UNEXPLORED CELL TYPE, shouldn't be hardcoded
                 frontier[x,y] = True
                 continue
         
@@ -88,7 +66,7 @@ class FrontierPublisher(Node):
     """
     """
 
-    def __init__(self):
+    def __init__(self, publish_frequncy:float = 0.1):
         """ map_size: height, width """
 
         super().__init__('frontier_publisher')
@@ -108,16 +86,18 @@ class FrontierPublisher(Node):
             topic = 'frontier', 
             qos_profile = 10
         )
-        self.timer = self.create_timer(2.0, self.publish_frontier)
+        self.timer = self.create_timer(publish_frequncy, self.publish_frontier)
 
 
     def array2occupancy_grid(self, map: np.ndarray):
+        """ Convert an array to OccupancyGrid message type. See: http://docs.ros.org/en/noetic/api/nav_msgs/html/msg/OccupancyGrid.html"""
+        # TODO: The same function is also in publish_map.py - should create a commons.py to have these functions
         return OccupancyGrid(
             header = Header(frame_id = "map"), # the reference frame is the "true" map - which is the top level tf
             info = MapMetaData(
-                resolution = 0.1,
-                width = 155, # TODO: Dont know why we have to cast here, shouldnt be neccesary
-                height = 82, # TODO: Dont know why we have to cast here, shouldnt be neccesary
+                resolution = 0.1, # TODO: Same as the other map, shouldnt be hardcoded
+                width = map.shape[1],
+                height = map.shape[0],
                 origin = Pose(
                     position = Point(x = -7.79, y = -4.06, z = 0.0), # TODO: This is the hardcoded offset to make the map line up perfectly with the existing map, not nescessary 
                     orientation = Quaternion(x = 0.0, y = 0.0, z = 0.0, w = 1.0)
@@ -128,8 +108,8 @@ class FrontierPublisher(Node):
 
     def publish_frontier(self):
         """ """
-        print("pub", np.sum(self.map), self.map.shape)
-        self.frontier_publisher.publish(self.array2occupancy_grid(self.map))
+        if self.map is not None:
+            self.frontier_publisher.publish(self.array2occupancy_grid(self.map))
 
 
     def map_callback(self, occupancy_grid: OccupancyGrid) -> None:
@@ -140,7 +120,7 @@ class FrontierPublisher(Node):
 
         map = np.array(occupancy_grid.data).reshape(map_height, map_width)
 
-        start = (map_height // 2, map_width // 2)
+        start = (map_height // 2, map_width // 2) # TODO: We cant assume that the map center will always be explored - we could start from a corner etc.
 
         self.map = bfs(map, start)
         
