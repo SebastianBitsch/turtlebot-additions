@@ -21,7 +21,7 @@ def DDA(a:np.ndarray, b:np.ndarray) -> np.ndarray:
     delta = (b - a).astype(float)
     steps = np.max(np.abs(delta)).astype(int)
     delta /= steps
-    return [a + i * delta for i in range(steps - 1)]
+    return [a + i * delta for i in range(steps)]
 
 
 class MapPublisher(Node):
@@ -41,7 +41,7 @@ class MapPublisher(Node):
         # Init map
         self.map_resolution = map_resolution
         self.map_size = np.array(map_size, dtype=int) // 2
-        self.map = 100 * np.ones(self.map_size, dtype=int)
+        self.map = -1 * np.ones(self.map_size, dtype=int)
 
         # Create a publisher to send map
         self.map_publisher = self.create_publisher(OccupancyGrid, topic = 'map1', qos_profile = 10)
@@ -63,6 +63,9 @@ class MapPublisher(Node):
             qos_profile = 10
         )
 
+    def is_point_on_map(self, point: np.ndarray) -> bool:
+        assert point.shape == (2,), f"Error: Can only check if 2D points are on map. Point had shape {point.shape}"
+        return (np.zeros(2) < point).all() and (point < self.map_size).all()
 
     def array2occupancy_grid(self, map: np.ndarray):
         return OccupancyGrid(
@@ -129,24 +132,28 @@ class MapPublisher(Node):
                 point = Point(x = end_point[0], y = end_point[1], z = end_point[2])
             )
 
+            # Convert the endpoint of the ray to a coordinate on the map
             end_point = do_transform_point(end_point, robot2world_transform)
             grid_coords = self.world2map_coords(end_point.point.x, end_point.point.y)
 
             # Write the point to the grid
-            if (np.zeros(2) < grid_coords).all() and (grid_coords < self.map_size).all():
+            if self.is_point_on_map(grid_coords):
                 robot_grid_pos = self.world2map_coords(self.robot_pose.position.x, self.robot_pose.position.y)
+
+                # Generate the line from the robot to the end of the raycast line
                 line_points = DDA(robot_grid_pos, grid_coords)
 
-                # Handle direct hits to the objects of the 
+                # Handle direct hits to the objects of the ray cast
                 if hit:
-                    self.map[grid_coords[0], grid_coords[1]] = 100 # green
+                    self.map[grid_coords[0], grid_coords[1]] = 100 # black
 
+                # Populate the map in the cells where the ray intersects
                 for x, y in line_points:
-                    if (np.zeros(2) < np.array([x,y])).all() and (np.array([x,y]) < self.map_size).all():
-                        if hit:
-                            self.map[int(x), int(y)] = 0#-10 # yellow
-                        else: 
-                            self.map[int(x), int(y)] = 0#-50 # orange
+                    if self.is_point_on_map(np.array([x,y])):
+                        if hit: # Directly observed
+                            self.map[int(x), int(y)] = -10 # yellow
+                        else:   # Indirectly observed
+                            self.map[int(x), int(y)] = -50 # orange
     
 
     def odometry_callback(self, odometry: Odometry) -> None:
