@@ -1,5 +1,5 @@
 from enum import IntEnum
-from collections import deque as queue
+from collections import deque
 
 import rclpy
 from rclpy.node import Node
@@ -25,10 +25,13 @@ dCol = [ 0, 1, 0, -1]
  
 # Function to check if a cell
 # is be visited or not
-def isValid(vis, row, col):
+def isValid(vis, grid, row, col):
    
     # If cell lies out of bounds
     if (row < 0 or col < 0 or row >= 82 - 1 or col >= 155 - 1):
+        return False
+    
+    if grid[row][col] == -100:
         return False
  
     # If cell is already visited
@@ -39,35 +42,46 @@ def isValid(vis, row, col):
     return True
  
 # Function to perform the BFS traversal
-def BFS(grid, vis, row, col):
-   
-    # Stores indices of the matrix cells
-    q = queue()
+def bfs(grid: np.ndarray, start: tuple) -> np.ndarray:
+    
+    visited = np.zeros_like(grid, dtype=bool)
+    frontier = np.zeros_like(grid, dtype=bool)
+    queue = deque()
  
-    # Mark the starting cell as visited
-    # and push it into the queue
-    q.append(( row, col ))
-    vis[row][col] = True
+    queue.append((start[0], start[1]))
+    visited[*start] = True
  
-    # Iterate while the queue
-    # is not empty
-    while (0 < len(q)):
-        cell = q.popleft()
+    while 0 < len(queue):
+        cell = queue.popleft()
         x = cell[0]
         y = cell[1]
-        print(grid[x][y], end = " ")
- 
-        #q.pop()
- 
-        # Go to the adjacent cells
+  
+        # Check neighbours
         for i in range(4):
-            adjx = x + dRow[i]
-            adjy = y + dCol[i]
-            if (isValid(vis, adjx, adjy)):
-                q.append((adjx, adjy))
-                vis[adjx][adjy] = True
- 
+            row = x + dRow[i]
+            col = y + dCol[i]
+            
+            # Check out of bounds
+            if row < 0 or col < 0 or 82 <= row or 155 <= col:
+                continue
 
+            # Check if already been here
+            if visited[row, col]:
+                continue
+
+            # Check if wall
+            if 80 < grid[row, col]:
+                continue
+
+            # Check if neighbour is unknown, if so we found a frontier
+            if grid[row, col] == -100:
+                frontier[x,y] = True
+                continue
+        
+            queue.append((row, col))
+            visited[row][col] = True
+
+    return frontier
 
 
 class FrontierPublisher(Node):
@@ -94,10 +108,27 @@ class FrontierPublisher(Node):
             topic = 'frontier', 
             qos_profile = 10
         )
+        self.timer = self.create_timer(2.0, self.publish_frontier)
 
 
-    def publish_map(self):
+    def array2occupancy_grid(self, map: np.ndarray):
+        return OccupancyGrid(
+            header = Header(frame_id = "map"), # the reference frame is the "true" map - which is the top level tf
+            info = MapMetaData(
+                resolution = 0.1,
+                width = 155, # TODO: Dont know why we have to cast here, shouldnt be neccesary
+                height = 82, # TODO: Dont know why we have to cast here, shouldnt be neccesary
+                origin = Pose(
+                    position = Point(x = -7.79, y = -4.06, z = 0.0), # TODO: This is the hardcoded offset to make the map line up perfectly with the existing map, not nescessary 
+                    orientation = Quaternion(x = 0.0, y = 0.0, z = 0.0, w = 1.0)
+                )
+            ),
+            data = 100 * map.flatten().astype("int8")
+        )
+
+    def publish_frontier(self):
         """ """
+        print("pub", np.sum(self.map), self.map.shape)
         self.frontier_publisher.publish(self.array2occupancy_grid(self.map))
 
 
@@ -107,12 +138,11 @@ class FrontierPublisher(Node):
         map_width = occupancy_grid.info.width
         map_height = occupancy_grid.info.height
 
-        self.map = np.array(occupancy_grid.data).reshape(map_height, map_width)
+        map = np.array(occupancy_grid.data).reshape(map_height, map_width)
 
         start = (map_height // 2, map_width // 2)
-        print(self.map.shape, start)
-        print("------")
-        print(BFS(self.map, np.zeros_like(self.map), *start))
+
+        self.map = bfs(map, start)
         
 
 
