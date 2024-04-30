@@ -1,3 +1,5 @@
+from enum import IntEnum
+
 import rclpy
 from rclpy.node import Node
 
@@ -14,6 +16,13 @@ from tf2_geometry_msgs import do_transform_point
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
+
+class CellType(IntEnum):
+    """ Helper class to avoid magic numbers for cell types """
+    UNEXPLORED = -100           # red
+    DIRECTLY_OBSERVED = -10     # orange
+    INDIRECTLY_OBSERVED = -50   # yellow
+    OCCUPIED   = 100            # black
 
 
 def DDA(a:np.ndarray, b:np.ndarray) -> np.ndarray:
@@ -41,7 +50,7 @@ class MapPublisher(Node):
         # Init map
         self.map_resolution = map_resolution
         self.map_size = np.array(map_size, dtype=int) // 2
-        self.map = -1 * np.ones(self.map_size, dtype=int)
+        self.map = CellType.UNEXPLORED.value * np.ones(self.map_size, dtype=int)
 
         # Create a publisher to send map
         self.map_publisher = self.create_publisher(OccupancyGrid, topic = 'map1', qos_profile = 10)
@@ -145,15 +154,15 @@ class MapPublisher(Node):
 
                 # Handle direct hits to the objects of the ray cast
                 if hit:
-                    self.map[grid_coords[0], grid_coords[1]] = 100 # black
+                    self.map[grid_coords[0], grid_coords[1]] = CellType.OCCUPIED.value
 
                 # Populate the map in the cells where the ray intersects
                 for x, y in line_points:
                     if self.is_point_on_map(np.array([x,y])):
                         if hit: # Directly observed
-                            self.map[int(x), int(y)] = -10 # yellow
+                            self.map[int(x), int(y)] = CellType.DIRECTLY_OBSERVED.value
                         else:   # Indirectly observed
-                            self.map[int(x), int(y)] = -50 # orange
+                            self.map[int(x), int(y)] = CellType.INDIRECTLY_OBSERVED.value
     
 
     def odometry_callback(self, odometry: Odometry) -> None:
