@@ -1,3 +1,5 @@
+from enum import IntEnum
+
 import rclpy
 from rclpy.node import Node
 
@@ -14,6 +16,9 @@ from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
+class CellType(IntEnum):
+    UNEXPLORED = -100
+
 
 def DDA(a:np.ndarray, b:np.ndarray) -> np.ndarray:
     """ Digital differential analyzer. See: https://en.wikipedia.org/wiki/Digital_differential_analyzer_(graphics_algorithm) """
@@ -27,7 +32,7 @@ class MapPublisher(Node):
     """
     """
 
-    def __init__(self, map_size: tuple = (164, 311), map_resolution: float = 0.1, publish_frequency: float = 0.5):
+    def __init__(self, map_size: tuple = (164, 311), map_resolution: float = 0.1, publish_frequency: float = 0.1):
         """ map_size: height, width """
 
         super().__init__('map_publisher')
@@ -41,7 +46,7 @@ class MapPublisher(Node):
         # Init map
         self.map_resolution = map_resolution
         self.map_size = np.array(map_size, dtype=int) // 2
-        self.map = 50 * np.ones(self.map_size, dtype=int)
+        self.map = CellType.UNEXPLORED.value * np.ones(self.map_size, dtype=int)
 
         # Create a publisher to send map
         self.map_publisher = self.create_publisher(OccupancyGrid, topic = 'map1', qos_profile = 10)
@@ -77,7 +82,7 @@ class MapPublisher(Node):
                 width = int(self.map_size[1]), # TODO: Dont know why we have to cast here, shouldnt be neccesary
                 height = int(self.map_size[0]), # TODO: Dont know why we have to cast here, shouldnt be neccesary
                 origin = Pose(
-                    position = Point(x = -7.79, y = -4.06, z = 0.0), # TODO: How are we supposed to get this ?? This is the center of the map
+                    position = Point(x = -7.79, y = -4.06, z = 0.0), # TODO: This is the hardcoded offset to make the map line up perfectly with the existing map, not nescessary 
                     orientation = Quaternion(x = 0.0, y = 0.0, z = 0.0, w = 1.0)
                 )
             ),
@@ -148,11 +153,17 @@ class MapPublisher(Node):
                 # Populate the map in the cells where the ray intersects
                 for x, y in line_points:
                     if self.is_point_on_map(np.array([x,y])):
+                        if self.map[int(x), int(y)] == CellType.UNEXPLORED:
+                            self.map[int(x), int(y)] = 50
+
                         if 0 < self.map[int(x), int(y)]:
                             self.map[int(x), int(y)] -= 1
 
                 # Handle direct hits to the objects of the ray cast
                 if hit:
+                    if self.map[grid_coords[0], grid_coords[1]] == CellType.UNEXPLORED:
+                        self.map[grid_coords[0], grid_coords[1]] = 50
+
                     if self.map[grid_coords[0], grid_coords[1]] < 95:
                         self.map[grid_coords[0], grid_coords[1]] += 5
 
