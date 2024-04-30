@@ -27,7 +27,7 @@ def project_point_to_linesegment(start: np.ndarray, end: np.ndarray, p: np.ndarr
     return proj, t
 
 
-def RDT(initial_point: np.ndarray | None = None, bounds: np.ndarray = np.ones(2), n: int = 1000):
+def RDT(initial_point: np.ndarray = None, bounds: np.ndarray = np.ones(2), n: int = 1000):
     """
     Generate a Rapidly-exploring Dense Tree (RDT) following Figure 5.16 in 'Planning algorithms'.
 
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     ax.set_ylim([0,1])
     ax.set_axis_off()
 
-    lines = RDT()
+    lines = RDT(n = 100)
 
     # Draw plot
     for start, end in lines:

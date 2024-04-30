@@ -1,9 +1,6 @@
-from enum import IntEnum
-
 import rclpy
 from rclpy.node import Node
 
-from scipy.spatial.distance import cdist
 import numpy as np
 
 from sensor_msgs.msg import LaserScan, PointField, PointCloud2
@@ -17,13 +14,6 @@ from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
-class CellType(IntEnum):
-    """ Helper class to avoid magic numbers for cell types """
-    UNEXPLORED = -100           # red
-    DIRECTLY_OBSERVED = -10     # orange
-    INDIRECTLY_OBSERVED = -50   # yellow
-    OCCUPIED   = 100            # black
-
 
 def DDA(a:np.ndarray, b:np.ndarray) -> np.ndarray:
     """ Digital differential analyzer. See: https://en.wikipedia.org/wiki/Digital_differential_analyzer_(graphics_algorithm) """
@@ -34,7 +24,8 @@ def DDA(a:np.ndarray, b:np.ndarray) -> np.ndarray:
 
 
 class MapPublisher(Node):
-    """ """
+    """
+    """
 
     def __init__(self, map_size: tuple = (164, 311), map_resolution: float = 0.1, publish_frequency: float = 0.5):
         """ map_size: height, width """
@@ -50,7 +41,7 @@ class MapPublisher(Node):
         # Init map
         self.map_resolution = map_resolution
         self.map_size = np.array(map_size, dtype=int) // 2
-        self.map = CellType.UNEXPLORED.value * np.ones(self.map_size, dtype=int)
+        self.map = 50 * np.ones(self.map_size, dtype=int)
 
         # Create a publisher to send map
         self.map_publisher = self.create_publisher(OccupancyGrid, topic = 'map1', qos_profile = 10)
@@ -72,9 +63,11 @@ class MapPublisher(Node):
             qos_profile = 10
         )
 
+
     def is_point_on_map(self, point: np.ndarray) -> bool:
         assert point.shape == (2,), f"Error: Can only check if 2D points are on map. Point had shape {point.shape}"
         return (np.zeros(2) < point).all() and (point < self.map_size).all()
+
 
     def array2occupancy_grid(self, map: np.ndarray):
         return OccupancyGrid(
@@ -152,22 +145,22 @@ class MapPublisher(Node):
                 # Generate the line from the robot to the end of the raycast line
                 line_points = DDA(robot_grid_pos, grid_coords)
 
-                # Handle direct hits to the objects of the ray cast
-                if hit:
-                    self.map[grid_coords[0], grid_coords[1]] = CellType.OCCUPIED.value
-
                 # Populate the map in the cells where the ray intersects
                 for x, y in line_points:
                     if self.is_point_on_map(np.array([x,y])):
-                        if hit: # Directly observed
-                            self.map[int(x), int(y)] = CellType.DIRECTLY_OBSERVED.value
-                        else:   # Indirectly observed
-                            self.map[int(x), int(y)] = CellType.INDIRECTLY_OBSERVED.value
-    
+                        if 0 < self.map[int(x), int(y)]:
+                            self.map[int(x), int(y)] -= 1
+
+                # Handle direct hits to the objects of the ray cast
+                if hit:
+                    if self.map[grid_coords[0], grid_coords[1]] < 95:
+                        self.map[grid_coords[0], grid_coords[1]] += 5
+
 
     def odometry_callback(self, odometry: Odometry) -> None:
         """ Update the robot position and rotation from the odometry """
         self.robot_pose = odometry.pose.pose
+
 
 
 def main(args=None):
