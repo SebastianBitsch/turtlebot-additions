@@ -79,13 +79,14 @@ class FrontierPublisher(Node):
 
     def map2world_coords(self, grid_x, grid_y) -> np.ndarray:
         # TODO: There is a bug here i am almost certain - should be fixable tho
-        return (np.array([grid_x, grid_y]) - np.array([self.map_width, self.map_height]) / 2.0) * self.map_resolution
+        # Flipping height/width seemed to work... idk man :)
+        return (np.array([grid_x, grid_y]) - (np.array([self.map_height, self.map_width]) / 2.0)) * self.map_resolution
 
     
     def select_random_grid_coord(self, frontier_grid: np.ndarray) -> tuple:
         """ Select a random 2D coordinate from a boolean grid """
         indices = np.where(frontier_grid)
-        random_index = np.random.choice(np.arange(len(indices)), size=1)[0]
+        random_index = np.random.choice(np.arange(len(indices[0])), size=1)[0]
         row = indices[1][random_index]
         col = indices[0][random_index]
         return row, col
