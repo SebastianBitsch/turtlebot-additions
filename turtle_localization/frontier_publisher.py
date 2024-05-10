@@ -27,7 +27,11 @@ def bfs(grid: np.ndarray, start: tuple) -> np.ndarray:
     queue = deque()
  
     queue.append(start)
+    # Only works for python version 3.11 or greater.
     visited[*start] = True
+
+    # For python3 3.8 or 3.10
+    # visited[start] = True
     
     while 0 < len(queue):
         cell = queue.popleft()

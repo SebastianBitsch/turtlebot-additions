@@ -1,0 +1,4 @@
+log/
+build/
+install/
+**/__pycache__
